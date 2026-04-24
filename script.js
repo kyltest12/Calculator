@@ -88,7 +88,7 @@
 
     // === ХРАНЕНИЕ ДАННЫХ АРТЕФАКТОВ ===
     let artifacts = [
-        { name: 'Бенгальский огонь', price: 1500, image: 'https://i.imgur.com/rhQsLNq.png',
+        { name: 'Бенгальский огонь', price: 1500, image: '',
           properties: { 'Радиация': '-0.06 мк3в/сек', 'Электрошок': '+10%' } },
         { name: 'Ломоть мяса', price: 1550, image: 'https://static.wikia.nocookie.net/stalker/images/a/ac/Icon_SoC_artefact_mincer_meat.png/revision/latest?cb=20230723224233&path-prefix=ru',
           properties: { 'Гашение урона': '-1%', 'Защита от разрыва': '+5%', 'Радиация': '-0.08 мк3в/сек', 'Химический ожог': '+10%' } },
@@ -191,6 +191,8 @@
         }
     }
 
+    const savedMutantPrices = localStorage.getItem('mutantPartPrices');
+
     // === ТЕМНАЯ ТЕМА ===
     const themeToggle = document.getElementById('themeToggleBtn');
     const htmlElement = document.documentElement;
@@ -290,6 +292,16 @@
     let totalSum = 0;
     let currentBonus = 0;
     const quantityElements = new Map();
+    const artifactImageFolder = 'артефакты V2';
+    const fallbackImage = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="70" height="70"%3E%3Crect fill="white" width="70" height="70"/%3E%3C/svg%3E';
+
+    function getLocalArtifactImagePath(name) {
+        return `${artifactImageFolder}/${encodeURIComponent(name)}.png`;
+    }
+
+    artifacts.forEach((artifact) => {
+        artifact.image = getLocalArtifactImagePath(artifact.name);
+    });
 
     function savePricesToStorage() {
         const prices = artifacts.map(a => a.price);
@@ -317,7 +329,7 @@
         const img = document.createElement('img');
         img.src = artifact.image;
         img.alt = artifact.name;
-        img.onerror = function () { this.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="70" height="70"%3E%3Crect fill="white" width="70" height="70"/%3E%3C/svg%3E'; };
+        img.onerror = function () { this.src = fallbackImage; };
         imgButton.appendChild(img);
         itemDiv.appendChild(imgButton);
 
@@ -424,7 +436,8 @@
             input.focus();
             
             const saveNewPrice = () => {
-                const newPrice = parseInt(input.value) || artifact.price;
+                const parsedPrice = parseInt(input.value, 10);
+                const newPrice = Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : artifact.price;
                 artifact.price = newPrice;
                 priceDiv.textContent = newPrice + ' руб.';
                 
@@ -541,7 +554,8 @@
     savePricesBtn.addEventListener('click', () => {
         artifacts.forEach((artifact, index) => {
             const input = document.getElementById(`price_${index}`);
-            artifact.price = parseInt(input.value) || artifact.price;
+            const parsedPrice = parseInt(input.value, 10);
+            artifact.price = Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : artifact.price;
         });
         
         document.querySelectorAll('.price').forEach((priceDiv, index) => {
@@ -562,7 +576,11 @@
 
     // === МУТАНТЫ ===
     const mutantTotalDisplay = document.getElementById('mutantTotalSum');
+    const mutantFinalDisplay = document.getElementById('mutantFinalSum');
+    const mutantBonusButtons = document.querySelectorAll('.mutant-bonus-btn');
     let mutantTotalSum = 0;
+    let currentMutantBonus = 0;
+    const mutantQuantityElements = new Map();
     const mutantPartsNormal = [
         { name: 'Хвост собаки', price: 1165 }, { name: 'Глаз плоти', price: 1390 }, { name: 'Шкура собаки', price: 1500 },
         { name: 'Копыта кабана', price: 2055 }, { name: 'Шкура кабана', price: 2400 }
@@ -572,24 +590,53 @@
         { name: 'Голова собаки паразита', price: 1750 }, { name: 'Рука зомби', price: 2390 }, { name: 'Рука излома', price: 2555 },
         { name: 'Нога снорка', price: 2890 }, { name: 'Голова зомби паразита', price: 3000 }, { name: 'Маска снорка', price: 3250 }
     ];
+    const mutantParts = [...mutantPartsNormal, ...mutantPartsRare];
+
+    if (savedMutantPrices) {
+        try {
+            const prices = JSON.parse(savedMutantPrices);
+            if (Array.isArray(prices)) {
+                mutantParts.forEach((part, index) => {
+                    const savedPrice = prices[index];
+                    if (Number.isFinite(savedPrice) && savedPrice >= 0) {
+                        part.price = savedPrice;
+                    }
+                });
+            }
+        } catch (error) {
+            console.warn('Не удалось загрузить сохраненные цены частей мутантов:', error);
+            localStorage.removeItem('mutantPartPrices');
+        }
+    }
+
+    function saveMutantPricesToStorage() {
+        const prices = mutantParts.map(part => part.price);
+        localStorage.setItem('mutantPartPrices', JSON.stringify(prices));
+    }
 
     function updateMutantTotals() { 
-        mutantTotalDisplay.textContent = mutantTotalSum.toLocaleString('ru-RU'); 
+        mutantTotalDisplay.textContent = mutantTotalSum.toLocaleString('ru-RU');
+        mutantFinalDisplay.textContent = Math.round(mutantTotalSum * (1 - currentMutantBonus / 100)).toLocaleString('ru-RU');
     }
 
     function createMutantButton(part, isRare) {
         const itemDiv = document.createElement('div'); 
-        itemDiv.className = 'mutant-item';
+        itemDiv.className = 'item mutant-item';
         
         const nameDiv = document.createElement('div'); 
-        nameDiv.className = 'mutant-item-name'; 
+        nameDiv.className = 'item-name'; 
         nameDiv.textContent = part.name;
+
+        const visualDiv = document.createElement('div');
+        visualDiv.className = 'mutant-card-visual';
+        visualDiv.textContent = isRare ? 'R' : 'N';
         
         const priceDiv = document.createElement('div'); 
-        priceDiv.className = 'mutant-price'; 
+        priceDiv.className = 'price'; 
         priceDiv.textContent = part.price + ' руб.';
         
         itemDiv.appendChild(nameDiv); 
+        itemDiv.appendChild(visualDiv);
         itemDiv.appendChild(priceDiv);
         
         const controlsDiv = document.createElement('div'); 
@@ -604,24 +651,58 @@
         const quantitySpan = document.createElement('div'); 
         quantitySpan.className = 'quantity'; 
         quantitySpan.textContent = '0';
+        mutantQuantityElements.set(part.name, quantitySpan);
         
         const addBtn = document.createElement('button'); 
         addBtn.className = 'btn-control'; 
         addBtn.textContent = '+';
-        
-        addBtn.addEventListener('click', () => {
-            quantitySpan.textContent = parseInt(quantitySpan.textContent) + 1; 
-            mutantTotalSum += part.price; 
+
+        const updateQuantity = (delta) => {
+            const currentQty = parseInt(quantitySpan.textContent);
+            const nextQty = Math.max(0, currentQty + delta);
+            const actualDelta = nextQty - currentQty;
+
+            if (actualDelta === 0) return;
+
+            quantitySpan.textContent = nextQty;
+            mutantTotalSum += actualDelta * part.price;
             updateMutantTotals();
-        });
-        
-        subBtn.addEventListener('click', () => {
-            let q = parseInt(quantitySpan.textContent); 
-            if (q > 0) { 
-                quantitySpan.textContent = --q; 
-                mutantTotalSum -= part.price; 
-                updateMutantTotals(); 
-            }
+        };
+
+        addBtn.addEventListener('click', () => updateQuantity(1));
+        subBtn.addEventListener('click', () => updateQuantity(-1));
+
+        priceDiv.addEventListener('dblclick', () => {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.className = 'price-input';
+            input.value = part.price;
+            input.min = '0';
+            input.step = '1';
+
+            priceDiv.textContent = '';
+            priceDiv.appendChild(input);
+            input.focus();
+
+            const saveNewPrice = () => {
+                const parsedPrice = parseInt(input.value, 10);
+                const newPrice = Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : part.price;
+                part.price = newPrice;
+                priceDiv.textContent = newPrice + ' руб.';
+
+                mutantTotalSum = Array.from(mutantQuantityElements.entries()).reduce((sum, [name, span]) => {
+                    const mutantPart = mutantParts.find(item => item.name === name);
+                    return sum + (parseInt(span.textContent) * mutantPart.price);
+                }, 0);
+
+                updateMutantTotals();
+                saveMutantPricesToStorage();
+            };
+
+            input.addEventListener('blur', saveNewPrice);
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') saveNewPrice();
+            });
         });
         
         buttonGroup.appendChild(subBtn); 
@@ -632,18 +713,29 @@
         document.getElementById(isRare ? 'mutantButtonsContainerRare' : 'mutantButtonsContainerNormal').appendChild(itemDiv);
     }
 
+    mutantBonusButtons.forEach(btn => btn.addEventListener('click', () => {
+        mutantBonusButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMutantBonus = parseInt(btn.dataset.bonus);
+        updateMutantTotals();
+    }));
+
     document.getElementById('mutantResetBtn').addEventListener('click', () => {
         mutantTotalSum = 0;
-        document.querySelectorAll('.mutant-item .quantity').forEach(el => el.textContent = '0');
+        currentMutantBonus = 0;
+        mutantBonusButtons.forEach(b => b.classList.remove('active'));
+        mutantBonusButtons[0].classList.add('active');
+        mutantQuantityElements.forEach(span => span.textContent = '0');
         updateMutantTotals();
     });
 
     mutantPartsNormal.forEach(p => createMutantButton(p, false));
     mutantPartsRare.forEach(p => createMutantButton(p, true));
+    mutantBonusButtons[0].classList.add('active');
 
     // Копирование по клику
     totalDisplay.addEventListener('click', (e) => copyToClipboard(totalSum.toString(), e));
     finalDisplay.addEventListener('click', (e) => copyToClipboard(Math.round(totalSum * (1 + currentBonus / 100)).toString(), e));
     mutantTotalDisplay.addEventListener('click', (e) => copyToClipboard(mutantTotalSum.toString(), e));
+    mutantFinalDisplay.addEventListener('click', (e) => copyToClipboard(Math.round(mutantTotalSum * (1 - currentMutantBonus / 100)).toString(), e));
 })();
-
